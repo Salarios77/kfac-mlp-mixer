@@ -159,7 +159,6 @@ def train(epoch):
     correct = 0
     total = 0
 
-    lr_scheduler.step()
     desc = ('[%s][LR=%s] Loss: %.3f | Acc: %.3f%% (%d/%d)' %
             (tag, lr_scheduler.get_lr()[0], 0, 0, correct, total))
 
@@ -193,6 +192,7 @@ def train(epoch):
                 (tag, lr_scheduler.get_lr()[0], train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
         prog_bar.set_description(desc, refresh=True)
 
+    lr_scheduler.step()
     writer.add_scalar('train/loss', train_loss/(batch_idx + 1), epoch)
     writer.add_scalar('train/acc', 100. * correct / total, epoch)
 

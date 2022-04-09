@@ -89,10 +89,9 @@ class KFACOptimizer(optim.Optimizer):
         :return: no returns.
         """
         eps = 1e-10  # for numerical stability
-        self.d_a[m], self.Q_a[m] = torch.symeig(
-            self.m_aa[m], eigenvectors=True)
-        self.d_g[m], self.Q_g[m] = torch.symeig(
-            self.m_gg[m], eigenvectors=True)
+        upper = True
+        self.d_a[m], self.Q_a[m] = torch.linalg.eigh(self.m_aa[m], UPLO='U' if upper else 'L')
+        self.d_g[m], self.Q_g[m] = torch.linalg.eigh(self.m_gg[m], UPLO='U' if upper else 'L')
 
         self.d_a[m].mul_((self.d_a[m] > eps).float())
         self.d_g[m].mul_((self.d_g[m] > eps).float())
@@ -164,7 +163,7 @@ class KFACOptimizer(optim.Optimizer):
                     continue
                 d_p = p.grad.data
                 if weight_decay != 0 and self.steps >= 20 * self.TCov:
-                    d_p.add_(weight_decay, p.data)
+                    d_p.add_(p.data, alpha=weight_decay)
                 if momentum != 0:
                     param_state = self.state[p]
                     if 'momentum_buffer' not in param_state:
@@ -172,10 +171,10 @@ class KFACOptimizer(optim.Optimizer):
                         buf.mul_(momentum).add_(d_p)
                     else:
                         buf = param_state['momentum_buffer']
-                        buf.mul_(momentum).add_(1, d_p)
+                        buf.mul_(momentum).add_(d_p, alpha=1)
                     d_p = buf
 
-                p.data.add_(-group['lr'], d_p)
+                p.data.add_(d_p, alpha=-group['lr'])
 
     def step(self, closure=None):
         # FIXME(CW): temporal fix for compatibility with Official LR scheduler.
