@@ -80,6 +80,8 @@ if not args.large_res:
 else:
     im_size = 224
 
+print('Image size:', im_size)
+
 if args.network == 'mlpB16_pretrain':
     print('using pretrained network')
     config = CONFIGS['Mixer-B_16'] #pretrained on imagenet1k
