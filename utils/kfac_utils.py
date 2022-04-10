@@ -180,8 +180,9 @@ class ComputeCovG:
     def linear(g, layer, batch_averaged):
         # g: batch_size * out_dim
         # batch_size = g.size(0)
-        print(f"g size:{g.size()}")
+        # print(f"g size:{g.size()}")
         if len(g.size()) == 3:
+            g = g.contiguous()
             g = g.view(-1, g.size(-1))
         
         batch_size = g.size(0)
