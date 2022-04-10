@@ -11,10 +11,13 @@ from tqdm import tqdm
 from tensorboardX import SummaryWriter
 from utils.network_utils import get_network
 from utils.data_utils import get_dataloader
+import numpy as np
 
 from mlp_mixer_pytorch import MLPMixer
 import time
 
+from pretrain_models.model import MlpMixer as MlpMixer_pretrain
+from pretrain_models.model import CONFIGS
 
 # fetch args
 parser = argparse.ArgumentParser()
@@ -43,19 +46,23 @@ parser.add_argument('--optimizer', default='kfac', type=str)
 parser.add_argument('--batch_size', default=64, type=int)
 parser.add_argument('--epoch', default=100, type=int)
 parser.add_argument('--milestone', default=None, type=str)
-parser.add_argument('--learning_rate', default=0.01, type=float)
+parser.add_argument('--learning_rate', default=1e-3, type=float) #0.01
 parser.add_argument('--momentum', default=0.9, type=float)
 parser.add_argument('--stat_decay', default=0.95, type=float)
 parser.add_argument('--damping', default=1e-3, type=float)
 parser.add_argument('--kl_clip', default=1e-2, type=float)
-parser.add_argument('--weight_decay', default=3e-3, type=float)
+parser.add_argument('--weight_decay', default=5e-5, type=float) #3e-3
 parser.add_argument('--TCov', default=10, type=int)
 parser.add_argument('--TScal', default=10, type=int)
 parser.add_argument('--TInv', default=100, type=int)
 
 parser.add_argument('--num_workers', default=2, type=int)
+parser.add_argument('--pretrain', default=None, type=str)
 
 parser.add_argument('--prefix', default=None, type=str)
+
+parser.add_argument('--large_res', action='store_true')
+
 args = parser.parse_args()
 
 # init model
@@ -67,23 +74,78 @@ num_classes = nc[args.dataset]
 
 print('Network:', args.network)
 
-if args.network == 'mlp_mixer':
-    #([64, 3, 32, 32]
-    #mlp size: img = torch.randn(1, 3, 256, 256)
+if not args.large_res:
+    im_size = 32
+    assert not args.network == 'mlpB16_pretrain'
+else:
+    im_size = 224
 
-    net = MLPMixer(
-        image_size = ((32,32)), #256,
-        #image_size = ((224,224)), #256,
-        channels = 3,
-        #patch_size = 32,  # 4
-        patch_size = 4,  # 4
-        dim = 512,
-        #dim = 768,
-        #depth = 12,
-        depth = 8,
-        #depth = 12,
-        num_classes = num_classes
-    )
+if args.network == 'mlpB16_pretrain':
+    print('using pretrained network')
+    config = CONFIGS['Mixer-B_16'] #pretrained on imagenet1k
+    net = MlpMixer_pretrain(config, 224, num_classes=num_classes, patch_size=16, zero_head=True)
+    net.load_from(np.load(args.pretrain))
+    args.large_res = True
+elif args.network == 'mlpB':
+    if args.large_res:
+        config = CONFIGS['Mixer-B_16'] 
+        patch_size = 16
+    else:
+        config = CONFIGS['Mixer-B_4'] 
+        patch_size = 4
+    net = MlpMixer_pretrain(config, im_size, num_classes=num_classes, patch_size=patch_size, zero_head=True)
+elif args.network == 'mlpS':
+    if args.large_res:
+        config = CONFIGS['Mixer-S_16'] 
+        patch_size = 16
+    else:
+        config = CONFIGS['Mixer-S_4'] 
+        patch_size = 4
+    net = MlpMixer_pretrain(config, im_size, num_classes=num_classes, patch_size=patch_size, zero_head=True)
+
+# elif args.network == 'mlpL16':
+#     #([64, 3, 32, 32]
+#     #mlp size: img = torch.randn(1, 3, 256, 256)
+#     net = MLPMixer(
+#         image_size = ((32,32)), #256,
+#         channels = 3,
+#         patch_size = 16, #16,
+#         dim = 1024,
+#         depth = 24,
+#         num_classes = num_classes
+#     )
+# elif args.network == 'mlpB16':
+#     #mlp size: img = torch.randn(1, 3, 256, 256)
+#     net = MLPMixer(
+#         image_size = ((32,32)), #256,
+#         #image_size = ((224,224)), #256,
+#         channels = 3,
+#         patch_size = 16, #16,
+#         dim = 768,
+#         depth = 12,
+#         num_classes = num_classes
+#     )   
+
+# elif args.network == 'mlpS16':
+#     #mlp size: img = torch.randn(1, 3, 256, 256)
+#     net = MLPMixer(
+#         image_size = ((32,32)), #256,
+#         channels = 3,
+#         patch_size = 16, #16,
+#         dim = 512,
+#         depth = 8,
+#         num_classes = num_classes
+#     )    
+ 
+# elif args.network == 'mlpnano':
+#     net = MLPMixer(
+#         image_size = ((32,32)), #256,
+#         channels = 3,
+#         patch_size = 4, #16,
+#         dim = 512,
+#         depth = 8,
+#         num_classes = num_classes
+#     )
 else:
     net = get_network(args.network,
                     depth=args.depth,
@@ -99,7 +161,8 @@ net = net.to(args.device)
 trainloader, testloader = get_dataloader(dataset=args.dataset,
                                          train_batch_size=args.batch_size,
                                          test_batch_size=256,
-                                         num_workers=args.num_workers)
+                                         num_workers=args.num_workers,
+                                         large_res=args.large_res)
 
 # init optimizer and lr scheduler
 optim_name = args.optimizer.lower()
@@ -167,7 +230,7 @@ if not os.path.isdir(log_dir):
 writer = SummaryWriter(log_dir)
 
 
-def train(epoch):
+def train(epoch, model=None):
     print('\nEpoch: %d' % epoch)
     net.train()
     train_loss = 0
@@ -183,8 +246,11 @@ def train(epoch):
     for batch_idx, (inputs, targets) in prog_bar:
         inputs, targets = inputs.to(args.device), targets.to(args.device)
         optimizer.zero_grad()
-        outputs = net(inputs)
-        loss = criterion(outputs, targets)
+        if model=='mlpB16_pretrain':
+            outputs, loss = net(inputs, targets)
+        else:
+            outputs = net(inputs)
+            loss = criterion(outputs, targets)
         if optim_name in ['kfac', 'ekfac'] and optimizer.steps % optimizer.TCov == 0:
             # compute true fisher
             optimizer.acc_stats = True
@@ -265,7 +331,7 @@ def test(epoch):
 def main():
     for epoch in range(start_epoch, args.epoch):
         start = time.time()
-        train(epoch)
+        train(epoch, args.network)
         print('Train Epoch completed in {:.2f} s'.format(time.time()-start))
         test(epoch)
     return best_acc
