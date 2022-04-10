@@ -16,9 +16,9 @@ import ml_collections
 
 
 def get_mixer_s4_config():
-    """Returns Mixer-B/16 configuration."""
+    """Returns Mixer-S/4 configuration."""
     config = ml_collections.ConfigDict()
-    config.name = 'Mixer-B_16'
+    config.name = 'Mixer-S_4'
     config.patches = ml_collections.ConfigDict({'size': (4, 4)})
     config.hidden_dim = 512
     config.num_blocks = 8
@@ -27,9 +27,9 @@ def get_mixer_s4_config():
     return config
 
 def get_mixer_s16_config():
-    """Returns Mixer-B/16 configuration."""
+    """Returns Mixer-S/16 configuration."""
     config = ml_collections.ConfigDict()
-    config.name = 'Mixer-B_16'
+    config.name = 'Mixer-S_16'
     config.patches = ml_collections.ConfigDict({'size': (16, 16)})
     config.hidden_dim = 512
     config.num_blocks = 8
@@ -38,9 +38,9 @@ def get_mixer_s16_config():
     return config
 
 def get_mixer_b4_config():
-    """Returns Mixer-B/16 configuration."""
+    """Returns Mixer-B/4 configuration."""
     config = ml_collections.ConfigDict()
-    config.name = 'Mixer-B_16'
+    config.name = 'Mixer-B_4'
     config.patches = ml_collections.ConfigDict({'size': (4, 4)})
     config.hidden_dim = 768
     config.num_blocks = 12
