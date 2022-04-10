@@ -13,6 +13,9 @@ from utils.network_utils import get_network
 from utils.data_utils import get_dataloader
 
 from mlp_mixer_pytorch import MLPMixer
+import time
+
+
 # fetch args
 parser = argparse.ArgumentParser()
 
@@ -37,7 +40,7 @@ parser.add_argument('--log_dir', default='runs/pretrain', type=str)
 
 
 parser.add_argument('--optimizer', default='kfac', type=str)
-parser.add_argument('--batch_size', default=64, type=float)
+parser.add_argument('--batch_size', default=64, type=int)
 parser.add_argument('--epoch', default=100, type=int)
 parser.add_argument('--milestone', default=None, type=str)
 parser.add_argument('--learning_rate', default=0.01, type=float)
@@ -50,6 +53,7 @@ parser.add_argument('--TCov', default=10, type=int)
 parser.add_argument('--TScal', default=10, type=int)
 parser.add_argument('--TInv', default=100, type=int)
 
+parser.add_argument('--num_workers', default=2, type=int)
 
 parser.add_argument('--prefix', default=None, type=str)
 args = parser.parse_args()
@@ -60,22 +64,27 @@ nc = {
     'cifar100': 100
 }
 num_classes = nc[args.dataset]
-mlp_mixer=True
-if mlp_mixer:
+
+print('Network:', args.network)
+
+if args.network == 'mlp_mixer':
     #([64, 3, 32, 32]
     #mlp size: img = torch.randn(1, 3, 256, 256)
 
     net = MLPMixer(
         image_size = ((32,32)), #256,
+        #image_size = ((224,224)), #256,
         channels = 3,
-        patch_size = 16,
+        #patch_size = 32,  # 4
+        patch_size = 4,  # 4
         dim = 512,
-        depth = 12,
+        #dim = 768,
+        #depth = 12,
+        depth = 8,
+        #depth = 12,
         num_classes = num_classes
     )
-
 else:
-
     net = get_network(args.network,
                     depth=args.depth,
                     num_classes=num_classes,
@@ -83,12 +92,14 @@ else:
                     compressionRate=args.compressionRate,
                     widen_factor=args.widen_factor,
                     dropRate=args.dropRate)
+
 net = net.to(args.device)
 
 # init dataloader
 trainloader, testloader = get_dataloader(dataset=args.dataset,
                                          train_batch_size=args.batch_size,
-                                         test_batch_size=256)
+                                         test_batch_size=256,
+                                         num_workers=args.num_workers)
 
 # init optimizer and lr scheduler
 optim_name = args.optimizer.lower()
@@ -97,6 +108,10 @@ if optim_name == 'sgd':
     optimizer = optim.SGD(net.parameters(),
                           lr=args.learning_rate,
                           momentum=args.momentum,
+                          weight_decay=args.weight_decay)
+elif optim_name == 'adam':
+    optimizer = optim.Adam(net.parameters(),
+                          lr=args.learning_rate,
                           weight_decay=args.weight_decay)
 elif optim_name == 'kfac':
     optimizer = KFACOptimizer(net,
@@ -159,11 +174,10 @@ def train(epoch):
     correct = 0
     total = 0
 
-    lr_scheduler.step()
     desc = ('[%s][LR=%s] Loss: %.3f | Acc: %.3f%% (%d/%d)' %
-            (tag, lr_scheduler.get_lr()[0], 0, 0, correct, total))
+            (tag, lr_scheduler.get_last_lr()[0], 0, 0, correct, total))
 
-    writer.add_scalar('train/lr', lr_scheduler.get_lr()[0], epoch)
+    writer.add_scalar('train/lr', lr_scheduler.get_last_lr()[0], epoch)
 
     prog_bar = tqdm(enumerate(trainloader), total=len(trainloader), desc=desc, leave=True)
     for batch_idx, (inputs, targets) in prog_bar:
@@ -190,8 +204,10 @@ def train(epoch):
         correct += predicted.eq(targets).sum().item()
 
         desc = ('[%s][LR=%s] Loss: %.3f | Acc: %.3f%% (%d/%d)' %
-                (tag, lr_scheduler.get_lr()[0], train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+                (tag, lr_scheduler.get_last_lr()[0], train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
         prog_bar.set_description(desc, refresh=True)
+
+    lr_scheduler.step()
 
     writer.add_scalar('train/loss', train_loss/(batch_idx + 1), epoch)
     writer.add_scalar('train/acc', 100. * correct / total, epoch)
@@ -204,7 +220,7 @@ def test(epoch):
     correct = 0
     total = 0
     desc = ('[%s][LR=%s] Loss: %.3f | Acc: %.3f%% (%d/%d)'
-            % (tag,lr_scheduler.get_lr()[0], test_loss/(0+1), 0, correct, total))
+            % (tag,lr_scheduler.get_last_lr()[0], test_loss/(0+1), 0, correct, total))
 
     prog_bar = tqdm(enumerate(testloader), total=len(testloader), desc=desc, leave=True)
     with torch.no_grad():
@@ -219,7 +235,7 @@ def test(epoch):
             correct += predicted.eq(targets).sum().item()
 
             desc = ('[%s][LR=%s] Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                    % (tag, lr_scheduler.get_lr()[0], test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+                    % (tag, lr_scheduler.get_last_lr()[0], test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
             prog_bar.set_description(desc, refresh=True)
 
     # Save checkpoint.
@@ -248,7 +264,9 @@ def test(epoch):
 
 def main():
     for epoch in range(start_epoch, args.epoch):
+        start = time.time()
         train(epoch)
+        print('Train Epoch completed in {:.2f} s'.format(time.time()-start))
         test(epoch)
     return best_acc
 
