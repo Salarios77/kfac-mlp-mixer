@@ -108,7 +108,10 @@ class ComputeCovA:
     @staticmethod
     def conv2d(a, layer):
         batch_size = a.size(0)
+        # print(f"a shape:", a.size())
         a = _extract_patches(a, layer.kernel_size, layer.stride, layer.padding)
+        # print(f"after extract patches shape:", a.size())
+
         spatial_size = a.size(1) * a.size(2)
         a = a.view(-1, a.size(-1))
         if layer.bias is not None:
@@ -128,6 +131,7 @@ class ComputeCovA:
                 a = a.view(-1, a.size(-1))
             else:  
                 a = torch.cat([a, a.new(a.size(0), 1).fill_(1)], 1)
+            batch_size = a.size(0)
         return a.t() @ (a / batch_size)
 
 
@@ -175,10 +179,12 @@ class ComputeCovG:
     @staticmethod
     def linear(g, layer, batch_averaged):
         # g: batch_size * out_dim
-        batch_size = g.size(0)
-
+        # batch_size = g.size(0)
+        print(f"g size:{g.size()}")
         if len(g.size()) == 3:
             g = g.view(-1, g.size(-1))
+        
+        batch_size = g.size(0)
 
         if batch_averaged:
             cov_g = g.t() @ (g * batch_size)

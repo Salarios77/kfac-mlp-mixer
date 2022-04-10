@@ -76,6 +76,7 @@ class KFACOptimizer(optim.Optimizer):
         for module in self.model.modules():
             classname = module.__class__.__name__
             # print('=> We keep following layers in KFAC. <=')
+            print(f"==> classname:", classname)
             if classname in self.known_modules:
                 self.modules.append(module)
                 module.register_forward_pre_hook(self._save_input)
