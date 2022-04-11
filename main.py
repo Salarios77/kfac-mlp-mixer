@@ -19,6 +19,8 @@ import time
 from pretrain_models.model import MlpMixer as MlpMixer_pretrain
 from pretrain_models.model import CONFIGS
 
+from optimetry import Graft
+
 # fetch args
 parser = argparse.ArgumentParser()
 
@@ -62,6 +64,9 @@ parser.add_argument('--pretrain', default=None, type=str)
 parser.add_argument('--prefix', default=None, type=str)
 
 parser.add_argument('--large_res', action='store_true')
+
+parser.add_argument('--graftM', default='sgd', type=str)
+parser.add_argument('--graftD', default='kfac', type=str)
 
 args = parser.parse_args()
 
@@ -199,6 +204,50 @@ elif optim_name == 'ekfac':
                                TCov=args.TCov,
                                TScal=args.TScal,
                                TInv=args.TInv)
+elif optim_name == 'graft':
+    print('Using Graft optimizer with M={} and D={}'.format(args.graftM, args.graftD))
+
+    if args.graftM == 'sgd':
+        M_optim = optim.SGD(net.parameters(),
+                          lr=args.learning_rate,
+                          momentum=args.momentum,
+                          weight_decay=args.weight_decay)
+    elif args.graftM == 'kfac':
+        M_optim = KFACOptimizer(net,
+                              lr=args.learning_rate,
+                              momentum=args.momentum,
+                              stat_decay=args.stat_decay,
+                              damping=args.damping,
+                              kl_clip=args.kl_clip,
+                              weight_decay=args.weight_decay,
+                              TCov=args.TCov,
+                              TInv=args.TInv)
+    else:
+        raise NotImplementedError
+    
+    if args.graftD == 'sgd':
+        D_optim = optim.SGD(net.parameters(),
+                          lr=args.learning_rate,
+                          momentum=args.momentum,
+                          weight_decay=args.weight_decay)
+    elif args.graftD == 'kfac':
+        D_optim = KFACOptimizer(net,
+                              lr=args.learning_rate,
+                              momentum=args.momentum,
+                              stat_decay=args.stat_decay,
+                              damping=args.damping,
+                              kl_clip=args.kl_clip,
+                              weight_decay=args.weight_decay,
+                              TCov=args.TCov,
+                              TInv=args.TInv)
+    else:
+        raise NotImplementedError
+
+    optimizer = Graft(net.parameters(), M_optim, D_optim)
+
+    # Rename args.optimizer for logging purposes
+    args.optimizer = 'graft_{}_{}'.format(args.graftM, args.graftD)
+    
 else:
     raise NotImplementedError
 
@@ -253,16 +302,26 @@ def train(epoch, model=None):
         else:
             outputs = net(inputs)
             loss = criterion(outputs, targets)
-        if optim_name in ['kfac', 'ekfac'] and optimizer.steps % optimizer.TCov == 0:
+
+        if optim_name == 'graft' and args.graftM == 'kfac':
+            kfac_optimizer = M_optim
+            graft_kfac = True
+        elif optim_name == 'graft' and args.graftD == 'kfac':
+            kfac_optimizer = D_optim
+            graft_kfac = True
+        else:
+            kfac_optimizer = optimizer
+
+        if (graft_kfac or optim_name in ['kfac', 'ekfac']) and kfac_optimizer.steps % kfac_optimizer.TCov == 0:
             # compute true fisher
-            optimizer.acc_stats = True
+            kfac_optimizer.acc_stats = True
             with torch.no_grad():
                 sampled_y = torch.multinomial(torch.nn.functional.softmax(outputs.cpu().data, dim=1),
                                               1).squeeze().cuda()
             loss_sample = criterion(outputs, sampled_y)
-            loss_sample.backward(retain_graph=True)
-            optimizer.acc_stats = False
-            optimizer.zero_grad()  # clear the gradient for computing true-fisher.
+            loss_sample.backward(retain_graph=True)  # kfac has a backward hook invoking _save_grad_output
+            kfac_optimizer.acc_stats = False
+            kfac_optimizer.zero_grad()  # clear the gradient for computing true-fisher.
         loss.backward()
         optimizer.step()
 
