@@ -3,3 +3,4 @@ __pycache__/
 runs/
 *.npz
 */__init__.py
+*.out

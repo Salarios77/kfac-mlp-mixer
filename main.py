@@ -297,6 +297,8 @@ def train(epoch, model=None):
     for batch_idx, (inputs, targets) in prog_bar:
         inputs, targets = inputs.to(args.device), targets.to(args.device)
         optimizer.zero_grad()
+        graft_kfac = False
+
         if model=='mlpB16_pretrain':
             outputs, loss = net(inputs, targets)
         else:
